@@ -59,7 +59,7 @@ object AwsLogger {
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /**
-     * Initializes the logger. This must be the first call to DLAwsLogger else you will get [UninitializedPropertyAccessException]
+     * Initializes the logger
      *
      * @param context The application context
      */
@@ -82,20 +82,16 @@ object AwsLogger {
     }
 
     /**
-     * To configure the AWS CloudWatchLogs client. Unless you call this method with the required parameters
-     * to setup the client the logs that are written to the local file will not be streamed to the
-     * cloudwatch. So once you have all the required parameters call the method to setup the client.
-     * The logs will be automatically started streaming at a regular interval to AWS cloudWatch once
-     * this method is called.
+     * Configures the AWS CloudWatchLogs client
      *
      * @param identityPoolId The identity pool id
-     * @param region         The AWS region which you can get from [DLRegions]
+     * @param region         The AWS region which you can get from [AwsRegions]
      * @param groupName      The log group name
      * @param streamName     The log stream name
      */
     fun setupLogClient(
         identityPoolId: String,
-        region: DLRegions,
+        region: AwsRegions,
         groupName: String,
         streamName: String,
     ) {

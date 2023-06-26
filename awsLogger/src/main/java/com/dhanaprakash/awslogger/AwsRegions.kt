@@ -7,7 +7,7 @@ import com.amazonaws.regions.Regions
  *
  * @param awsRegion The aws region
  */
-enum class DLRegions(val awsRegion: Regions) {
+enum class AwsRegions(val awsRegion: Regions) {
     US_EAST_1(Regions.US_EAST_1),
     US_EAST_2(Regions.US_EAST_2),
     AP_SOUTH_1(Regions.AP_SOUTH_1),
