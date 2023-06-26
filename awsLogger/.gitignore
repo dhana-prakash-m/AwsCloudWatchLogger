@@ -1,2 +1,3 @@
 /build
-/.idea
+# Compiled Java class files
+*.class
