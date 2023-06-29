@@ -1,4 +1,4 @@
-# AwsLogger
+# AwsCloudWatchLogger
 
 This library writes the received logs to the local file and streams the logs to the AWS CloudWatch at a regular interval(10 minutes) and also when the app is initialized.
 
