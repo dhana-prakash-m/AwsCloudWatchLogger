@@ -1,6 +1,5 @@
 package com.dhanaprakash.awslogger
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.util.Log
 import com.amazonaws.auth.CognitoCachingCredentialsProvider
@@ -31,7 +30,6 @@ import java.util.concurrent.TimeUnit
  * The class that writes the received to the local file immediately and streams the logs from the local
  * file to AWS CloudWatch at a regular interval.
  */
-@SuppressLint("StaticFieldLeak")
 object AwsLogger {
     private const val logFileName = "AwsCloudWatchLogs.txt"
     private const val tempLogFileName = "AwsCloudWatchLogsTemp.txt"
@@ -57,16 +55,21 @@ object AwsLogger {
     private val limitedIoDispatcher = ioDispatcher.limitedParallelism(1)
     private val sequentialExecutionScope = CoroutineScope(SupervisorJob() + limitedIoDispatcher)
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var throwableCallback: ((Throwable) -> Unit)? = null
+    private val coroutineExceptionHandler =
+        CoroutineExceptionHandler { _, throwable -> throwableCallback?.invoke(throwable) }
 
     /**
      * Initializes the logger
      *
-     * @param context The application context
+     * @param context           The application context
+     * @param throwableCallback Callback to let the consumers know the exceptions occurred here
      */
-    fun init(context: Context) {
+    fun init(context: Context, throwableCallback: ((Throwable) -> Unit)? = null) {
         appContext = context.applicationContext
+        this.throwableCallback = throwableCallback
         preferences = AwsLoggerPreferences(context)
-        applicationScope.launch {
+        applicationScope.launch(coroutineExceptionHandler) {
             delay(INITIAL_LOG_UPLOAD_DELAY)
             uploadLogsWork()
         }
@@ -95,9 +98,7 @@ object AwsLogger {
         groupName: String,
         streamName: String,
     ) {
-        applicationScope.launch(CoroutineExceptionHandler { _, throwable ->
-            Log.e(TAG, "setupLogClient failed", throwable)
-        }) {
+        applicationScope.launch(coroutineExceptionHandler) {
             preferences.identityPoolId = identityPoolId
             client = AmazonCloudWatchLogsClient(
                 CognitoCachingCredentialsProvider(
@@ -125,6 +126,7 @@ object AwsLogger {
             try {
                 client?.createLogGroup(this)
             } catch (exception: Exception) {
+                throwableCallback?.invoke(exception)
                 Log.e(TAG, "createLogGroup failed", exception)
             }
         }
@@ -143,6 +145,7 @@ object AwsLogger {
             try {
                 client?.createLogStream(this)
             } catch (exception: Exception) {
+                throwableCallback?.invoke(exception)
                 Log.e(TAG, "createLogStream failed", exception)
             }
         }
@@ -168,7 +171,7 @@ object AwsLogger {
             timestamp = System.currentTimeMillis()
         }
         // This writes logs to the file sequentially since it uses a coroutine dispatcher with limited parallelism
-        sequentialExecutionScope.launch {
+        sequentialExecutionScope.launch(coroutineExceptionHandler) {
             cacheLogInLocalStorage(gson.toJson(completeMessage))
         }
     }
@@ -191,16 +194,17 @@ object AwsLogger {
     /**
      * To upload the logs to the AWS cloudWatch
      */
-    fun uploadLogs() {
+    private suspend fun uploadLogs() {
         if (client == null) return
-        sequentialExecutionScope.launch {
+        sequentialExecutionScope.launch(coroutineExceptionHandler) {
             val bufferedReader = File(appContext.filesDir, logFileName).bufferedReader()
             // Here we are converting the json into corresponding object and appending it a list of log events
             val events = bufferedReader
                 .readLines()
                 .filter { it.isNotBlank() }
                 .mapNotNull { gson.fromJson(it, InputLogEvent::class.java) }
-                .filter { it.timestamp != null && it.message != null } as MutableList
+                .filter { it.timestamp != null && it.message != null }
+                .toMutableList()
             if (events.isEmpty()) return@launch
             totalLogEvents.clear()
             totalLogEvents.addAll(events)
@@ -225,13 +229,13 @@ object AwsLogger {
         val batchesWithExpectedTimeInterval = events.groupBy {
             it.timestamp <= endTimeOfBatch
         }[true]
-        batchesWithExpectedTimeInterval?.let { _logEvents ->
+        batchesWithExpectedTimeInterval?.let { logEvents ->
             // A log batch size should not have more than 10000 logs, so we are splitting the batches
             // with a maximum size of 5000
-            _logEvents.chunked(batchSize).forEach {
+            logEvents.chunked(batchSize).forEach {
                 batches.add(it)
             }
-            events.removeAll(_logEvents)
+            events.removeAll(logEvents)
         }
         if (events.isNotEmpty()) splitIntoBatchesAndUpload(events, batches)
         uploadBatchesToAws(batches)
@@ -277,6 +281,7 @@ object AwsLogger {
                     }
 
                     else -> {
+                        throwableCallback?.invoke(exception)
                         Log.e(this.javaClass.name, "uploadLogsToAws failed", exception)
                     }
                 }
@@ -351,7 +356,7 @@ object AwsLogger {
      * To clear all the cached logs from the local file
      */
     fun flushLogs() {
-        sequentialExecutionScope.launch {
+        sequentialExecutionScope.launch(coroutineExceptionHandler) {
             File(appContext.filesDir, logFileName).delete()
         }
     }
