@@ -13,9 +13,6 @@ class AwsLoggerPreferences constructor(context: Context) {
 
     companion object {
         private const val KEY_SEQUENCE_TOKEN = "sequence_token"
-        private const val KEY_GROUP_NAME = "group_name"
-        private const val KEY_STREAM_NAME = "stream_name"
-        private const val KEY_IDENTITY_POOL_ID = "identity_pool_id"
     }
 
     /**
@@ -26,36 +23,12 @@ class AwsLoggerPreferences constructor(context: Context) {
         set(token) = editor.putString(KEY_SEQUENCE_TOKEN, token).apply()
 
     /**
-     * Property that contains the log group name
-     */
-    var groupName: String?
-        get() = preference.getString(KEY_GROUP_NAME, "default_log_group")
-        set(name) = editor.putString(KEY_GROUP_NAME, name).apply()
-
-    /**
-     * Property that contains the log stream name
-     */
-    var streamName: String?
-        get() = preference.getString(KEY_STREAM_NAME, "default_log_stream")
-        set(name) = editor.putString(KEY_STREAM_NAME, name).apply()
-
-    /**
-     * Property that contains the app version
-     */
-    var identityPoolId: String?
-        get() = preference.getString(KEY_IDENTITY_POOL_ID, null)
-        set(id) = editor.putString(KEY_IDENTITY_POOL_ID, id).apply()
-
-    /**
      * To clear the logger preferences
      */
     fun resetPreferences() {
         with(editor) {
             remove(KEY_SEQUENCE_TOKEN)
-            remove(KEY_GROUP_NAME)
-            remove(KEY_STREAM_NAME)
-            remove(KEY_IDENTITY_POOL_ID)
-            editor.apply()
+            apply()
         }
     }
 }
