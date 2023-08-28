@@ -194,7 +194,7 @@ object AwsLogger {
     /**
      * To upload the logs to the AWS cloudWatch
      */
-    private suspend fun uploadLogs() {
+    suspend fun uploadLogs() {
         if (client == null) return
         sequentialExecutionScope.launch(coroutineExceptionHandler) {
             val bufferedReader = File(appContext.filesDir, logFileName).bufferedReader()
