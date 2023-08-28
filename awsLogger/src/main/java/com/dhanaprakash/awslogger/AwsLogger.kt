@@ -8,6 +8,8 @@ import com.amazonaws.services.logs.AmazonCloudWatchLogsClient
 import com.amazonaws.services.logs.model.CreateLogGroupRequest
 import com.amazonaws.services.logs.model.CreateLogStreamRequest
 import com.amazonaws.services.logs.model.DataAlreadyAcceptedException
+import com.amazonaws.services.logs.model.DescribeLogGroupsRequest
+import com.amazonaws.services.logs.model.DescribeLogStreamsRequest
 import com.amazonaws.services.logs.model.InputLogEvent
 import com.amazonaws.services.logs.model.InvalidParameterException
 import com.amazonaws.services.logs.model.InvalidSequenceTokenException
@@ -58,6 +60,8 @@ object AwsLogger {
     private var throwableCallback: ((Throwable) -> Unit)? = null
     private val coroutineExceptionHandler =
         CoroutineExceptionHandler { _, throwable -> throwableCallback?.invoke(throwable) }
+    private var logGroupName: String? = null
+    private var logStreamName: String? = null
 
     /**
      * Initializes the logger
@@ -99,7 +103,8 @@ object AwsLogger {
         streamName: String,
     ) {
         applicationScope.launch(coroutineExceptionHandler) {
-            preferences.identityPoolId = identityPoolId
+            logGroupName = groupName
+            logStreamName = streamName
             client = AmazonCloudWatchLogsClient(
                 CognitoCachingCredentialsProvider(
                     appContext,
@@ -109,10 +114,37 @@ object AwsLogger {
             ).apply {
                 setRegion(Region.getRegion(region.awsRegion))
             }
-            createLogGroup(groupName)
-            createLogStream(streamName)
+            if (!checkLogGroupExists(groupName)) createLogGroup(groupName)
+            if (!checkLogStreamExists(groupName, streamName)) createLogStream(groupName, streamName)
         }
     }
+
+    /**
+     * To check whether the log group with the given name is already present
+     *
+     * @param groupName The log group name to check
+     * @return True if exists else false
+     */
+    private suspend fun checkLogGroupExists(groupName: String): Boolean =
+        withContext(ioDispatcher) {
+            val request = DescribeLogGroupsRequest().withLogGroupNamePrefix(groupName)
+            val result = client?.describeLogGroups(request)
+            !result?.logGroups.isNullOrEmpty()
+        }
+
+    /**
+     * To check whether the log stream with the given name is already present
+     *
+     * @param groupName  The log group name to check
+     * @param streamName The log stream name to check
+     * @return True if exists else false
+     */
+    private suspend fun checkLogStreamExists(groupName: String, streamName: String): Boolean =
+        withContext(ioDispatcher) {
+            val request = DescribeLogStreamsRequest(groupName).withLogStreamNamePrefix(streamName)
+            val result = client?.describeLogStreams(request)
+            !result?.logStreams.isNullOrEmpty()
+        }
 
     /**
      *  Creates the log group with the given name
@@ -120,7 +152,6 @@ object AwsLogger {
      * @param logGroupName The log group name
      */
     private suspend fun createLogGroup(logGroupName: String): Unit = withContext(ioDispatcher) {
-        preferences.groupName = logGroupName
         with(CreateLogGroupRequest()) {
             this.logGroupName = logGroupName
             try {
@@ -135,21 +166,21 @@ object AwsLogger {
     /**
      * Creates the log stream with the given name
      *
+     * @param logGroupName  The log group name
      * @param logStreamName The log stream name
      */
-    private suspend fun createLogStream(logStreamName: String): Unit = withContext(ioDispatcher) {
-        preferences.streamName = logStreamName
-        with(CreateLogStreamRequest()) {
-            logGroupName = preferences.groupName
-            this.logStreamName = logStreamName
-            try {
-                client?.createLogStream(this)
-            } catch (exception: Exception) {
-                throwableCallback?.invoke(exception)
-                Log.e(TAG, "createLogStream failed", exception)
+    private suspend fun createLogStream(logGroupName: String, logStreamName: String): Unit =
+        withContext(ioDispatcher) {
+            with(CreateLogStreamRequest()) {
+                this.logGroupName = logGroupName
+                this.logStreamName = logStreamName
+                try {
+                    client?.createLogStream(this)
+                } catch (exception: Exception) {
+                    throwableCallback?.invoke(exception)
+                }
             }
         }
-    }
 
     /**
      * Logs the given message to the local text file
@@ -270,8 +301,15 @@ object AwsLogger {
                     // log stream or with wrong name for each, so if this exception occur we will retry
                     // creating log stream and log group, so that upload logs can succeed when called next time
                     is ResourceNotFoundException -> {
-                        preferences.groupName?.let { createLogGroup(it) }
-                        preferences.streamName?.let { createLogStream(it) }
+                        logGroupName?.let { groupName ->
+                            createLogGroup(groupName)
+                            logStreamName?.let {
+                                createLogStream(
+                                    logGroupName = groupName,
+                                    logStreamName = it,
+                                )
+                            }
+                        }
                         return
                     }
                     // This exception occurs if we order the logs with timestamp with wrong order,
@@ -298,8 +336,8 @@ object AwsLogger {
         val request = PutLogEventsRequest()
         request.apply {
             setLogEvents(logs)
-            logGroupName = preferences.groupName
-            logStreamName = preferences.streamName
+            logGroupName = this@AwsLogger.logGroupName
+            logStreamName = this@AwsLogger.logStreamName
             val token = preferences.sequenceToken
             if (token != null) sequenceToken = token
         }
